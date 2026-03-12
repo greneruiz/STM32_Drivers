@@ -3,7 +3,7 @@
  *  File Name: stm32_i2c.c
  *  Type     : C source file
  *  Purpose  : STM32F I2C driver
- *  Version  : 3.1
+ *  Version  : 3.5
  * ===================================================================
  *  Description
  *		* STM32F I2C driver. See Revision History for functional scope
@@ -26,7 +26,7 @@
  *		* Added STM32F4xx compile-time polymorphism
  * Version/Date : v2.1 / 2025-Oct-18 / G.RUIZ
  *		* Fixed bug at stm32_i2c_read() on block-reads: stop bit is 
- * 	now set thru SET_BIT (previously was thru WRITE_REG which 
+ * 		now set thru SET_BIT (previously was thru WRITE_REG which 
  *		turns off the PE bit)
  * Version/Date : v2.2 / 2025-Oct-24 / G.RUIZ
  *		* mcu_period_ns now integer-calculated
@@ -45,6 +45,22 @@
  * Version/Date : v3.1 / 2025-Dec-25 / G.RUIZ
  * 		* Merry christmas 25-25 !!
  * 		* Implemented interrupt-based functions
+ * Version/Date : v3.2 / 2026-Feb-08 / G.RUIZ
+ * 		* Added weak callback functions for I2C interrupt states
+ * Version/Date : v3.3 / 2026-Feb-11 / G.RUIZ
+ *		* Implemented Direct Memory Access (DMA) feature
+ * Version/Date : v3.4 / 2026-Feb-23 / G.RUIZ
+ *		* Implemented sequential mode, both blocking and non-blocking
+ *		* Added Doxygen descriptors for IRQ state functions
+ *		* Placed I2C_WRITE/READ bit logic and masking to this level
+ *		* Added STM32_I2C_DMA_ENABLE_IRQ()
+ * Version/Date : v3.5 / 2026-Mar-09 / G.RUIZ
+ * 		* Deprecated stm32_i2c_send_dma() and replaced with
+ * 		stm32_i2c_begin_dma(), which could perform send & receive.
+ * 		The communication direction is dictated by G_HAL_I2C_Handle's
+ * 		txSize and rxSize: for Send, rxSize = 0; for Receive,
+ * 		txSize = 0. Sequential mode (txSize & rxSize > 0) is not
+ * 		allowed in DMA mode.
  * ===================================================================
  */
 
@@ -124,7 +140,7 @@ static IRQn_Type get_i2c_error_irq( I2C_Channel channel );
 
 /**
  * ===================================================================
- * @brief	Function definitions - public functions
+ * @brief	Function definitions - blocking functions
  * ===================================================================
  */
 
@@ -217,7 +233,7 @@ void stm32_i2c_send( G_HAL_I2C_Handle * i2c )
 	while( !READ_BIT(_channel->SR1, I2C_SR1_SB )){}
 	
 	/* Send I2C device address */
-	WRITE_REG(_channel->DR, i2c->tgtDevAddr );							/* Write device id to DR buffer */
+	WRITE_REG(_channel->DR, ( i2c->tgtDevAddr & ~I2C_READ ));			/* Write device id to DR buffer */
 
 	if( i2c->txSize == 0U )
 	{
@@ -265,7 +281,7 @@ void stm32_i2c_receive( G_HAL_I2C_Handle * i2c )
 	while( !READ_BIT(_channel->SR1, I2C_SR1_SB )){}
 
 	/* Send I2C device address */
-	WRITE_REG(_channel->DR, ( i2c->tgtDevAddr | 0x01U ));
+	WRITE_REG(_channel->DR, ( i2c->tgtDevAddr | I2C_READ ));
 
 	/* Begin reading the byte/s */
 	if( i2c->rxSize == 1U )
@@ -323,6 +339,27 @@ void stm32_i2c_receive( G_HAL_I2C_Handle * i2c )
 
 
 /**
+ * @brief	Block function for I2C sequential transaction (write-then-read).
+ *			Starts, sends device address (write mode), and writes for txSize;
+			Then re-sends start, sends device address (read mode), and reads for rxSize.
+ * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * 
+ */
+void stm32_i2c_sequential( G_HAL_I2C_Handle * i2c )
+{
+//	i2c->restartMode = I2C_RESTART_ENABLED;		/* This should be disabled at the HAL layer, not here in the MCU layer. */
+	stm32_i2c_send( i2c );
+	stm32_i2c_receive( i2c );
+}
+
+
+/**
+ * ===================================================================
+ * @brief	Function definitions - NVIC functions
+ * ===================================================================
+ */
+
+/**
  * @brief	Enables the Cortex-M Nested Vector Interrupt Control (NVIC) for I2C events & errors
  * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
  * @return	0x00 (FAIL)
@@ -335,7 +372,7 @@ ReturnType stm32_i2c_enable_nvic( G_HAL_I2C_Handle * i2c )
 		return FAIL;
 
 	NVIC_EnableIRQ( get_i2c_event_irq( i2c->setup.channel ));
-//	NVIC_EnableIRQ( get_i2c_error_irq( i2c->setup.channel ));
+	NVIC_EnableIRQ( get_i2c_error_irq( i2c->setup.channel ));
 	
 	return PASS;
 }
@@ -376,6 +413,16 @@ void stm32_i2c_disable_nvic( G_HAL_I2C_Handle * i2c )
 #define STM32_I2C_ENABLE_IRQ( chan )	\
 	SET_BIT( chan->CR2, ( I2C_CR2_ITBUFEN | I2C_CR2_ITEVTEN | I2C_CR2_ITERREN ))		
 
+
+/**
+ * @brief	Enables the I2C DMA interrupt events
+ * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * 
+ */
+#define STM32_I2C_DMA_ENABLE_IRQ( chan )	\
+	SET_BIT( chan->CR2, ( I2C_CR2_ITEVTEN | I2C_CR2_ITERREN ))
+
+
 /**
  * @brief	Disables the I2C interrupt events
  * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
@@ -384,6 +431,13 @@ void stm32_i2c_disable_nvic( G_HAL_I2C_Handle * i2c )
 #define STM32_I2C_DISABLE_IRQ( chan )			\
 	CLEAR_BIT(chan->CR2, ( I2C_CR2_ITBUFEN | I2C_CR2_ITEVTEN | I2C_CR2_ITERREN ))
 
+
+
+/**
+ * ===================================================================
+ * @brief	Function definitions - non-blocking functions
+ * ===================================================================
+ */
 
 /**
  * @brief	Non-blocking function for I2C write sequence.
@@ -423,7 +477,6 @@ ReturnType stm32_i2c_receive_nb( G_HAL_I2C_Handle * i2c )
 	I2C_TypeDef * _channel;
 	SELECT_I2C_CHAN( i2c->setup.channel );
 
-
 	i2c->setup.state = I2C_STATE_RX_BUSY;
 	i2c->setup.xCounter = i2c->rxSize;
 
@@ -434,11 +487,214 @@ ReturnType stm32_i2c_receive_nb( G_HAL_I2C_Handle * i2c )
 }
 
 
+/**
+ * @brief	Non-blocking function for I2C sequential mode (write-then-read).
+ *			The I2C handle must be provided with the correct write and read count,
+ *			else this function will not execute and will return FAIL.
+ * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * @return	PASS	- successfully started the I2C transaction
+ * @return	FAIL	- failed to initiate the I2C transaction
+ *
+ */
+ReturnType stm32_i2c_sequential_nb( G_HAL_I2C_Handle * i2c )
+{
+	if( i2c->setup.state != I2C_STATE_IDLE )
+		return FAIL;
+
+	if(( i2c->txSize == 0 ) || ( i2c->rxSize == 0 ))
+		return FAIL;
+
+	I2C_TypeDef * _channel;
+	SELECT_I2C_CHAN( i2c->setup.channel );
+
+	i2c->setup.state = I2C_STATE_TX_BUSY;
+	i2c->setup.xCounter = i2c->txSize;
+
+	STM32_I2C_ENABLE_IRQ(_channel );
+	SET_BIT(_channel->CR1, I2C_CR1_START );
+
+	return PASS;
+}
+
+
+/**
+ * ===================================================================
+ * @brief	Function definitions - direct memory access
+ * ===================================================================
+ */
+
+/**
+ * @brief	DMA Callback function for transaction completion
+ * @param	dma		G_HAL_DMA_Handle pointer to the dma object
+ * 
+ */
+void stm32_i2c_dma_completion_callback( G_HAL_DMA_Handle * dma )
+{
+	G_HAL_I2C_Handle * i2cParent = (G_HAL_I2C_Handle *)dma->parent_handle;
+	I2C_TypeDef * _channel;
+	SELECT_I2C_CHAN( i2cParent->setup.channel );
+
+	dma->disarm( dma );
+
+	/* clear the address status bit */
+	READ_REG( _channel->SR2 );		
+
+	/* Initiate stop */
+	SET_BIT( _channel->CR1, I2C_CR1_STOP );
+
+	/* Clear the I2C DMAEN bit */
+	/** TODO: 20260309 - Check if this works! */
+	CLEAR_BIT( _channel->CR2, I2C_CR2_DMAEN );
+}
+
+
+/**
+ * @brief	DMA Callback function for errors
+ * @param	dma		G_HAL_DMA_Handle pointer to the dma object
+ * 
+ */
+void stm32_i2c_dma_error_callback( G_HAL_DMA_Handle * dma )
+{
+	G_HAL_I2C_Handle * i2cParent = (G_HAL_I2C_Handle *)dma->parent_handle;
+	I2C_TypeDef * _channel;
+	SELECT_I2C_CHAN( i2cParent->setup.channel );
+
+	/* clear the address status bit */
+	READ_REG( _channel->SR2 );		
+
+	/* Clear the I2C DMAEN bit */
+	/** TODO: 20260309 - Check if this works! */
+	CLEAR_BIT( _channel->CR2, I2C_CR2_DMAEN );
+
+	dma->setup.state = DMA_STATE_ERROR;
+}
+
+
+/**
+ * @brief	Non-blocking function for I2C transactions using DMA.
+ * @details	To indicate a send or receive, the G_HAL_I2C_Handle members
+ * 			txSize and rxSize must be defined:
+ * 			Send: txSize > 0; rxSize = 0
+ * 			Receive: txSize = 0; rxSize > 0
+ * 			Sequential mode (txSize & rxSize > 0) is not allowed in DMA.
+ * @param	i2c				G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * @param	priority		G_HAL_Priority type (0-3) for the DMA interrupt.
+ * @return	0x00 (FAIL)		Failed to initiate the I2C transaction
+ * @return	0x01 (PASS)		Successfully started the I2C transaction
+ *
+ */
+ReturnType stm32_i2c_begin_dma( G_HAL_I2C_Handle * i2c, G_HAL_Priority priority )
+{
+	if( i2c->setup.state != I2C_STATE_IDLE )
+		return FAIL;
+
+	G_HAL_DMA_Handle * thisDMA;
+	I2C_TypeDef * _channel;
+	uintptr_t _sourceAddr, _destAddr;
+	uint32_t _length;
+	SELECT_I2C_CHAN( i2c->setup.channel );
+
+	/* If TX Mode (txSize > 0, rxSize = 0): */
+	if( i2c->txSize > 0 && i2c->rxSize == 0 )
+	{
+		if( i2c->txDMAHandle == NULL )
+		{
+			i2c->setup.state = I2C_STATE_ERROR;
+			return FAIL;
+		}
+		else
+		{
+			i2c->setup.state = I2C_STATE_TX_BUSY;
+			thisDMA = i2c->txDMAHandle;
+			thisDMA->setup.transferDirection = DMA_MEM_TO_PER;
+			_sourceAddr = (uintptr_t)i2c->txBuffer;
+			_destAddr = (uintptr_t)&(_channel->DR );
+			_length = i2c->txSize;
+		}
+	}
+	/* If RX Mode (rxSize > 0, txSize = 0): */
+	else if( i2c->rxSize > 0 && i2c->txSize == 0 )
+	{
+		if( i2c->rxDMAHandle == NULL )
+		{
+			i2c->setup.state = I2C_STATE_ERROR;
+			return FAIL;
+		}
+		else
+		{
+			i2c->setup.state = I2C_STATE_RX_BUSY;
+			thisDMA = i2c->rxDMAHandle;
+			thisDMA->setup.transferDirection = DMA_PER_TO_MEM;
+			_sourceAddr = (uintptr_t)&(_channel->DR );
+			_destAddr = (uintptr_t)i2c->txBuffer;
+			_length = i2c->rxSize;
+		}
+	}
+	/* If Sequential Mode (txSize & rxSize > 0) or no valid transaction size: */
+	else
+	{
+		i2c->setup.state = I2C_STATE_ERROR;
+		return FAIL;
+	}
+
+	/* Lock in the DMA callback functions */
+	thisDMA->transfer_done_callback = &stm32_i2c_dma_completion_callback;
+	thisDMA->error_callback = &stm32_i2c_dma_error_callback;
+
+	/* Initialize the DMA setup */
+	thisDMA->setup.bufferMode = DMA_SINGLE_BUFFER;
+	thisDMA->setup.priority = (uint8_t)priority;
+	thisDMA->setup.memory_autoinc = DMA_ADDR_AUTO_INC;
+	thisDMA->setup.periph_autoinc = DMA_ADDR_MANUAL;
+	thisDMA->setup.circularMode = DMA_CIRCULAR_MODE_OFF;
+	thisDMA->setup.flowController = FLOW_CONTROL_DMA;
+
+	/* Disable POS */
+	CLEAR_BIT( _channel->CR1, I2C_CR1_POS );
+
+	/* Enable the I2C DMA interrupts; enable I2C DMA mode */
+	STM32_I2C_DMA_ENABLE_IRQ( _channel );
+	SET_BIT( _channel->CR2, I2C_CR2_DMAEN );
+
+	/* Arm DMA stream */
+	if( thisDMA->start( thisDMA, _sourceAddr, _destAddr, (uintptr_t)NULL, _length ) == FAIL )
+	{
+		i2c->setup.state = I2C_STATE_ERROR;
+		thisDMA->disarm( thisDMA );				/** TODO: v3.4: This throws the DMA status back to Idle... should it? */
+		STM32_I2C_DISABLE_IRQ( _channel );
+		CLEAR_BIT( _channel->CR2, I2C_CR2_DMAEN );
+		return FAIL;
+	}
+
+	/* Enable Acknowledge */
+	SET_BIT(_channel->CR1, I2C_CR1_ACK );
+
+	/* Begin the I2C transaction */
+	SET_BIT(_channel->CR1, I2C_CR1_START );
+
+	return PASS;
+}
+
+
+/**
+ * ===================================================================
+ * @brief	Function definitions - interrupt state machine
+ * ===================================================================
+ */
+
+/**
+ * @brief	I2C IRQ state: start has been detected.
+ * @details	The device address is written to DR register.
+			If performing single-byte reads, the ACK bit is cleared.
+ * @param	i2c		G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * @param	channel	I2C_TypeDef pointer to the I2C channel (STM32-specific)
+ *
+ */
 static inline void STM32_I2C_State_Start_Detected( G_HAL_I2C_Handle * i2c, I2C_TypeDef * channel )
 {
 	if( i2c->setup.state == I2C_STATE_TX_BUSY )
 	{
-		WRITE_REG( channel->DR, i2c->tgtDevAddr );
+		WRITE_REG( channel->DR, i2c->tgtDevAddr & ~I2C_READ );
 	}
 	else if( i2c->setup.state == I2C_STATE_RX_BUSY )
 	{
@@ -450,6 +706,15 @@ static inline void STM32_I2C_State_Start_Detected( G_HAL_I2C_Handle * i2c, I2C_T
 	}
 }
 
+
+/**
+ * @brief	I2C IRQ state: address has been sent.
+ * @details	Clear the address status bit; If reading 1 byte, initiate stop.
+			This state will call an address callback function.
+ * @param	i2c		G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * @param	channel	I2C_TypeDef pointer to the I2C channel (STM32-specific)
+ *
+ */
 static inline void STM32_I2C_State_Address_Sent( G_HAL_I2C_Handle * i2c, I2C_TypeDef * channel )
 {
 	/* clear the address status bit */
@@ -462,9 +727,26 @@ static inline void STM32_I2C_State_Address_Sent( G_HAL_I2C_Handle * i2c, I2C_Typ
 			SET_BIT( channel->CR1, I2C_CR1_STOP );
 		else
 			SET_BIT( channel->CR1, I2C_CR1_ACK );
+
+		/* Perform the address callback function */
+		i2c->addr_callback( i2c );
 	}
 }
 
+
+/**
+ * @brief	I2C IRQ state: byte transfer is complete.
+ * @details	If in transmit mode:
+ *				* store the next byte-to-write (if any)
+ *				* If there are no more bytes to write and not a sequential transaction,
+				perform stop. If this is a sequential transaction,
+				start a read sequence by sending a start.
+			If in receive mode:
+				* store the received byte to the i2c handle.
+ * @param	i2c		G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * @param	channel	I2C_TypeDef pointer to the I2C channel (STM32-specific)
+ *
+ */
 static inline void STM32_I2C_State_Byte_Transfer_Finished( G_HAL_I2C_Handle * i2c, I2C_TypeDef * channel )
 {
 	if(( i2c->setup.state == I2C_STATE_TX_BUSY ) && ( READ_BIT( channel->SR1, I2C_SR1_TXE )))
@@ -479,9 +761,21 @@ static inline void STM32_I2C_State_Byte_Transfer_Finished( G_HAL_I2C_Handle * i2
 		{
 			if( i2c->restartMode == I2C_RESTART_DISABLED )
 				SET_BIT( channel->CR1, I2C_CR1_STOP );
-			
-			STM32_I2C_DISABLE_IRQ( channel );
-			i2c->setup.state = I2C_STATE_IDLE;
+
+			if(( i2c->rxSize > 0 ) && ( i2c->restartMode == I2C_RESTART_ENABLED ))
+			{
+				i2c->setup.state = I2C_STATE_RX_BUSY;
+				i2c->setup.xCounter = i2c->rxSize;
+				SET_BIT( channel->CR1, I2C_CR1_START );
+			}
+			else
+			{
+				STM32_I2C_DISABLE_IRQ( channel );
+				i2c->setup.state = I2C_STATE_IDLE;
+
+				/* Perform the master transmit done callback function */
+				i2c->master_tx_done_callback( i2c );		
+			}
 		}
 	}
 	else if( i2c->setup.state == I2C_STATE_RX_BUSY )
@@ -495,6 +789,14 @@ static inline void STM32_I2C_State_Byte_Transfer_Finished( G_HAL_I2C_Handle * i2
 	}
 }
 
+
+/**
+ * @brief	I2C IRQ state: transmit buffer is empty
+ * @details	Writes the next byte to be transmitted.
+ * @param	i2c		G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * @param	channel	I2C_TypeDef pointer to the I2C channel (STM32-specific)
+ *
+ */
 static inline void STM32_I2C_State_Transmit_Buffer_Empty( G_HAL_I2C_Handle * i2c, I2C_TypeDef * channel )
 {
 	if(( i2c->setup.state == I2C_STATE_TX_BUSY ) && ( i2c->setup.xCounter > 0 ))
@@ -504,6 +806,15 @@ static inline void STM32_I2C_State_Transmit_Buffer_Empty( G_HAL_I2C_Handle * i2c
 	}
 }
 
+
+/**
+ * @brief	I2C IRQ state: receive buffer is not empty
+ * @details	Stores the received byte.
+			If there are no more bytes to receive, perform stop.
+ * @param	i2c		G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * @param	channel	I2C_TypeDef pointer to the I2C channel (STM32-specific)
+ *
+ */
 static inline void STM32_I2C_State_Receive_Buffer_Not_Empty( G_HAL_I2C_Handle * i2c, I2C_TypeDef * channel )
 {
 	if( i2c->setup.state == I2C_STATE_RX_BUSY )
@@ -525,6 +836,9 @@ static inline void STM32_I2C_State_Receive_Buffer_Not_Empty( G_HAL_I2C_Handle * 
 			STM32_I2C_DISABLE_IRQ( channel );
 			CLEAR_BIT( channel->CR1, I2C_CR1_POS );
 			i2c->setup.state = I2C_STATE_IDLE;
+	
+			/* Perform the master receive done callback function */
+			i2c->master_rx_done_callback( i2c );	
 		}
 	}
 }
@@ -539,9 +853,10 @@ void STM32_I2C_EventIRQ_FSM( G_HAL_I2C_Handle * i2c )
 	I2C_TypeDef * _channel;
 	SELECT_I2C_CHAN( i2c->setup.channel );
 
-	uint32_t _itevt, _itbuf, _cond;
+	uint32_t _itevt, _itbuf, _dmaen, _cond;
 	_itevt = READ_BIT(_channel->CR2, I2C_CR2_ITEVTEN );
 	_itbuf = READ_BIT(_channel->CR2, I2C_CR2_ITBUFEN );
+	_dmaen = READ_BIT(_channel->CR2, I2C_CR2_DMAEN );
 	_cond = READ_REG(_channel->SR1 );
 
  	/* state_check_start: check start bit, then send i2c address */
@@ -557,19 +872,19 @@ void STM32_I2C_EventIRQ_FSM( G_HAL_I2C_Handle * i2c )
 	}
 
 	/* state_post_btf: Byte transfer finished */
-	else if((_cond & I2C_SR1_BTF ) && _itevt )
+	else if((_cond & I2C_SR1_BTF ) && _itevt && (_dmaen != I2C_CR2_DMAEN ))
 	{
 		STM32_I2C_State_Byte_Transfer_Finished( i2c, _channel );
 	}
 
 	/* state_transmit_bytes */
-	else if((_cond & I2C_SR1_TXE ) && _itevt && _itbuf )
+	else if((_cond & I2C_SR1_TXE ) && _itevt && _itbuf && (_dmaen != I2C_CR2_DMAEN ))
 	{
 		STM32_I2C_State_Transmit_Buffer_Empty( i2c, _channel );
 	}
 
 	/* state_receive_bytes:  */
-	else if((_cond & I2C_SR1_RXNE ) && (_itevt && _itbuf ))
+	else if((_cond & I2C_SR1_RXNE ) && (_itevt && _itbuf ) && (_dmaen != I2C_CR2_DMAEN ))
 	{
 		STM32_I2C_State_Receive_Buffer_Not_Empty( i2c, _channel );
 	}
@@ -597,22 +912,30 @@ void STM32_I2C_ErrorIRQ_FSM( G_HAL_I2C_Handle * i2c )
 		/* Abort the current transmission */
 		CLEAR_BIT(_channel->SR1, I2C_SR1_BERR );
 		i2c->setup.state = I2C_STATE_ERROR;
+
+		i2c->error_callback( i2c );
 	}
 	else if(_cond & I2C_SR1_AF )
 	{
 		CLEAR_BIT(_channel->SR1, I2C_SR1_AF );
 		SET_BIT(_channel->CR1, I2C_CR1_STOP );
 		i2c->setup.state = I2C_STATE_IDLE;
+
+		i2c->abort_callback( i2c );
 	}
 	else if(_cond & I2C_SR1_ARLO )
 	{
 		CLEAR_BIT(_channel->SR1, I2C_SR1_ARLO );
 		i2c->setup.state = I2C_STATE_ERROR;
+
+		i2c->error_callback( i2c );
 	}
 	else if(_cond & I2C_SR1_OVR )
 	{
 		CLEAR_BIT(_channel->SR1, I2C_SR1_OVR );
 		i2c->setup.state = I2C_STATE_ERROR;
+
+		i2c->error_callback( i2c );
 	}
 }
 
@@ -627,6 +950,8 @@ ReturnType stm32_i2c_irq_status( G_HAL_I2C_Handle * i2c )
 {
 	return i2c->setup.state == I2C_STATE_IDLE ? PASS : FAIL;
 }
+
+
 
 /**
  * ===================================================================

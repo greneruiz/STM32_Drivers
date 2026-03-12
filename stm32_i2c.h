@@ -3,12 +3,15 @@
  *  File Name: stm32_i2c.h
  *  Type     : C header file
  *  Purpose  : STM32F I2C driver
- *  Version  : 3.1
+ *  Version  : 3.4
  * ===================================================================
  *  Description
  *		* STM32F I2C driver. See Revision History for functional scope
  * 		and currently supported STM32F microcontrollers.
  * 		* Requires external pull-up resistors for SCL and SDA lines.
+ * 		* Strictly follows Controller Transmitter and Receiver as
+ * 		defined in RM0368 (STM32F4), except for Receiver-2 bytes in
+ * 		non-blocking mode.
  * ===================================================================
  *  Revision History
  * Version/Date : v1.0 / 2025-Aug-29 / G.RUIZ
@@ -44,6 +47,12 @@
  * 		* Implemented interrupt-based functions
  * 		* Functions now requre G_HAL_I2C_Handle as argument
  * 		(previously used I2C_Object)
+ * Version/Date : v3.2 / 2026-Feb-08 / G.RUIZ
+ * 		* Added weak callback functions for I2C interrupt states
+ * Version/Date : v3.3 / 2026-Feb-11 / G.RUIZ
+ *		* Implemented Direct Memory Access (DMA) feature
+ * Version/Date : v3.4 / 2026-Feb-23 / G.RUIZ
+ *		* Implemented sequential mode, both blocking and non-blocking
  * ===================================================================
  */
 
@@ -73,21 +82,21 @@
  * @return	0x01 = PASS
  * 
  */
-extern ReturnType stm32_i2c_initialize( G_HAL_I2C_Handle * i2c, uint8_t mcu_freq_mhz );
+ReturnType stm32_i2c_initialize( G_HAL_I2C_Handle * i2c, uint8_t mcu_freq_mhz );
 
 /**
  * @brief	Blocking function for I2C start (or re-start)
  * @param	i2c - G_HAL_I2C_Handle defined in g_hal_def.h
  *
  */
-extern void stm32_i2c_start( G_HAL_I2C_Handle * i2c );
+void stm32_i2c_start( G_HAL_I2C_Handle * i2c );
 
 /**
  * @brief	Blocking function for I2C stop
  * @param	i2c - G_HAL_I2C_Handle defined in g_hal_def.h
  *
  */
-extern void stm32_i2c_stop( G_HAL_I2C_Handle * i2c );
+void stm32_i2c_stop( G_HAL_I2C_Handle * i2c );
 
 
 /**
@@ -96,7 +105,7 @@ extern void stm32_i2c_stop( G_HAL_I2C_Handle * i2c );
  * @param	i2c	G_HAL_I2C_Handle defined in g_hal_def.h
  * 
  */
-extern void stm32_i2c_send( G_HAL_I2C_Handle * i2c );
+void stm32_i2c_send( G_HAL_I2C_Handle * i2c );
 
 
 /**
@@ -105,7 +114,7 @@ extern void stm32_i2c_send( G_HAL_I2C_Handle * i2c );
  * @param	i2c	G_HAL_I2C_Handle defined in g_hal_def.h
  * 
  */
-extern void stm32_i2c_receive( G_HAL_I2C_Handle * i2c );
+void stm32_i2c_receive( G_HAL_I2C_Handle * i2c );
 
 
 /**
@@ -113,7 +122,18 @@ extern void stm32_i2c_receive( G_HAL_I2C_Handle * i2c );
  * @param	i2c	G_HAL_I2C_Handle (defined in g_hal_def.h)
  * 
  */
-extern void stm32_i2c_send_bytes( G_HAL_I2C_Handle * i2c );
+void stm32_i2c_send_bytes( G_HAL_I2C_Handle * i2c );
+
+
+/**
+ * @brief	Block function for I2C sequential transaction (write-then-read).
+ *			Starts, sends device address (write mode), and writes for txSize;
+			Then re-sends start, sends device address (read mode), and reads for rxSize.
+ * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * 
+ */
+void stm32_i2c_sequential( G_HAL_I2C_Handle * i2c );
+
 
 
 /**
@@ -129,7 +149,7 @@ extern void stm32_i2c_send_bytes( G_HAL_I2C_Handle * i2c );
  * @return	FAIU	- failed to initiate the I2C transaction
  * 
  */
-extern ReturnType stm32_i2c_send_nb( G_HAL_I2C_Handle * i2c );
+ReturnType stm32_i2c_send_nb( G_HAL_I2C_Handle * i2c );
 
 
 /**
@@ -139,7 +159,19 @@ extern ReturnType stm32_i2c_send_nb( G_HAL_I2C_Handle * i2c );
  * @return	FAIL	- failed to initiate the I2C transaction
  * 
  */
-extern ReturnType stm32_i2c_receive_nb( G_HAL_I2C_Handle * i2c );
+ReturnType stm32_i2c_receive_nb( G_HAL_I2C_Handle * i2c );
+
+
+/**
+ * @brief	Non-blocking function for I2C sequential mode (write-then-read).
+ *			The I2C handle must be provided with the correct write and read count,
+ *			else this function will not execute and will return FAIL.
+ * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * @return	PASS	- successfully started the I2C transaction
+ * @return	FAIL	- failed to initiate the I2C transaction
+ *
+ */
+ReturnType stm32_i2c_sequential_nb( G_HAL_I2C_Handle * i2c );
 
 
 /**
@@ -158,7 +190,7 @@ ReturnType stm32_i2c_irq_status( G_HAL_I2C_Handle * i2c );
  * @return	0x01 (PASS)
  * 
  */
-extern ReturnType stm32_i2c_enable_nvic( G_HAL_I2C_Handle * i2c );
+ReturnType stm32_i2c_enable_nvic( G_HAL_I2C_Handle * i2c );
 
 
 /**
@@ -169,7 +201,7 @@ extern ReturnType stm32_i2c_enable_nvic( G_HAL_I2C_Handle * i2c );
  * @param	error_priority error interrupt priority (0-15)
  * 
  */
-extern void stm32_i2c_set_nvic_priority( G_HAL_I2C_Handle * i2c, uint32_t event_priority, uint32_t error_priority );
+void stm32_i2c_set_nvic_priority( G_HAL_I2C_Handle * i2c, uint32_t event_priority, uint32_t error_priority );
 
 
 /**
@@ -191,14 +223,15 @@ void stm32_i2c_disable_nvic( G_HAL_I2C_Handle * i2c );
  * @param	i2c G_HAL_I2C_Handle defined in g_hal_i2c.h
  * 
  */
-extern void STM32_I2C_EventIRQ_FSM( G_HAL_I2C_Handle * i2c );
+void STM32_I2C_EventIRQ_FSM( G_HAL_I2C_Handle * i2c );
 
 /**
  * @brief	State machine for the I2C interrupt event request (IRQ)
  * @param	i2c G_HAL_I2C_Handle defined in g_hal_i2c.h
  * 
  */
-extern void STM32_I2C_ErrorIRQ_FSM( G_HAL_I2C_Handle * i2c );
+void STM32_I2C_ErrorIRQ_FSM( G_HAL_I2C_Handle * i2c );
+
 
 
 
@@ -208,7 +241,21 @@ extern void STM32_I2C_ErrorIRQ_FSM( G_HAL_I2C_Handle * i2c );
  * ===================================================================
  */
 
-/// TODO
+/**
+ * @brief	Non-blocking function for I2C transactions using DMA.
+ * @details	To indicate a send or receive, the G_HAL_I2C_Handle members
+ * 			txSize and rxSize must be defined:
+ * 			Send: txSize > 0; rxSize = 0
+ * 			Receive: txSize = 0; rxSize > 0
+ * 			Sequential mode (txSize & rxSize > 0) is not allowed in DMA.
+ * @param	i2c				G_HAL_I2C_Handle defined in g_hal_i2c.h
+ * @param	priority		G_HAL_Priority type (0-3) for the DMA interrupt.
+ * @return	0x00 (FAIL)		Failed to initiate the I2C transaction
+ * @return	0x01 (PASS)		Successfully started the I2C transaction
+ *
+ */
+ReturnType stm32_i2c_begin_dma( G_HAL_I2C_Handle * i2c, G_HAL_Priority priority );
+
 
 
 
