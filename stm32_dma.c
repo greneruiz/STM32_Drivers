@@ -3,15 +3,19 @@
  *  File Name: stm32_dma.c
  *  Type     : C source file
  *  Purpose  : STM32F DMA driver
- *  Version  : 3.2
+ *  Version  : 1.1
  * ===================================================================
  *  Description
  *		* STM32F non-blocking DMA driver.
  *
  * ===================================================================
  *  Revision History
- * Version/Date : v1.0 / 2025-Feb-14 / G.RUIZ
+ * Version/Date : v1.0 / 2026-Feb-14 / G.RUIZ
  *		* Initial release
+ * Version/Date : v1.1 / 2026-Mar-15 / G.RUIZ
+ * 		* Deprecated NVIC functions:
+ * 			stm32_dma_enable_nvic()
+ * 			stm32_dma_disable_nvic()
  * ===================================================================
  */
 
@@ -59,6 +63,60 @@ typedef enum
  * @brief	Address spacing for DMA streams
  */
 #define DMA_STREAM_ADDR_STRIDE	((uint32_t)DMA1_Stream1_BASE - (uint32_t)DMA1_Stream0_BASE )
+
+
+
+
+/**
+ * @brief	Static function that returns the IRQn_Type of the DMA Stream
+ * 			and channel, as declared in the STM32 device header file.
+ * @param	stream	Void pointer to the DMA_Stream_TypeDef address
+ * @return	IRQn_Type name of the DMA IRQ
+ * 
+ */
+static IRQn_Type get_dma_event_irq( void * stream )
+{
+	uintptr_t baseAddr;
+	uint32_t stream_index;
+
+	if( (uintptr_t)stream >= (uintptr_t)DMA2_Stream0 )
+	{
+		baseAddr = (uintptr_t)DMA2_Stream0;
+		stream_index = ((uintptr_t)stream - baseAddr ) / DMA_STREAM_ADDR_STRIDE;	
+
+		switch( stream_index )
+		{
+			case 0:	return DMA2_Stream0_IRQn;	break;
+			case 1:	return DMA2_Stream1_IRQn;	break;
+			case 2:	return DMA2_Stream2_IRQn;	break;
+			case 3:	return DMA2_Stream3_IRQn;	break;
+			case 4:	return DMA2_Stream4_IRQn;	break;
+			case 5:	return DMA2_Stream5_IRQn;	break;
+			case 6:	return DMA2_Stream6_IRQn;	break;
+			case 7:	return DMA2_Stream7_IRQn;	break;
+			default:	return DMA2_Stream0_IRQn;
+		};
+	}
+	else
+	{
+		baseAddr = (uintptr_t)DMA1_Stream0;
+		stream_index = ((uintptr_t)stream - baseAddr ) / DMA_STREAM_ADDR_STRIDE;	
+		
+		switch( stream_index )
+		{
+			case 0:	return DMA1_Stream0_IRQn;	break;
+			case 1:	return DMA1_Stream1_IRQn;	break;
+			case 2:	return DMA1_Stream2_IRQn;	break;
+			case 3:	return DMA1_Stream3_IRQn;	break;
+			case 4:	return DMA1_Stream4_IRQn;	break;
+			case 5:	return DMA1_Stream5_IRQn;	break;
+			case 6:	return DMA1_Stream6_IRQn;	break;
+			case 7:	return DMA1_Stream7_IRQn;	break;
+			default:	return DMA1_Stream0_IRQn;
+		};
+	}
+}
+
 
 /**
  * @brief	Enables the DMA clock.
@@ -312,6 +370,7 @@ static ReturnType stm32_dma_config( G_HAL_DMA_Handle * dmaHandle )
 ReturnType stm32_dma_initialize( G_HAL_DMA_Handle * dmaHandle, uint8_t dmaChannel )
 {
 	DMA_TypeDef * thisDMA;
+	IRQn_Type _irq;
 
 	/* We're wasting calculations here because STM32's stream table is dogshit. */
 	uint8_t _stream_sel = dmaChannel / DMA_STREAM_CHANNELS;
@@ -341,6 +400,10 @@ ReturnType stm32_dma_initialize( G_HAL_DMA_Handle * dmaHandle, uint8_t dmaChanne
 	else
 		thisDMA = DMA1;
 
+	_irq = get_dma_event_irq( dmaHandle->setup.stream );
+	NVIC_DisableIRQ( _irq );
+	NVIC_SetPriority( _irq, G_HAL_CONST_NVIC_PRIORITY_DMA_EVENT );
+	NVIC_EnableIRQ( _irq );
 
 	if( stm32_dma_enable_rcc( thisDMA ) == FAIL )
 	{
@@ -491,88 +554,6 @@ ReturnType stm32_start_dma_transaction( G_HAL_DMA_Handle * dmaHandle, uintptr_t 
 	return PASS;
 }
 
-
-/**
- * @brief	Static function that returns the IRQn_Type of the DMA Stream
- * 			and channel, as declared in the STM32 device header file.
- * @param	stream	Void pointer to the DMA_Stream_TypeDef address
- * @return	IRQn_Type name of the DMA IRQ
- * 
- */
-static IRQn_Type get_dma_event_irq( void * stream )
-{
-	uintptr_t baseAddr;
-	uint32_t stream_index;
-
-	if( (uintptr_t)stream >= (uintptr_t)DMA2_Stream0 )
-	{
-		baseAddr = (uintptr_t)DMA2_Stream0;
-		stream_index = ((uintptr_t)stream - baseAddr ) / DMA_STREAM_ADDR_STRIDE;	
-
-		switch( stream_index )
-		{
-			case 0:	return DMA2_Stream0_IRQn;	break;
-			case 1:	return DMA2_Stream1_IRQn;	break;
-			case 2:	return DMA2_Stream2_IRQn;	break;
-			case 3:	return DMA2_Stream3_IRQn;	break;
-			case 4:	return DMA2_Stream4_IRQn;	break;
-			case 5:	return DMA2_Stream5_IRQn;	break;
-			case 6:	return DMA2_Stream6_IRQn;	break;
-			case 7:	return DMA2_Stream7_IRQn;	break;
-			default:	return DMA2_Stream0_IRQn;
-		};
-	}
-	else
-	{
-		baseAddr = (uintptr_t)DMA1_Stream0;
-		stream_index = ((uintptr_t)stream - baseAddr ) / DMA_STREAM_ADDR_STRIDE;	
-		
-		switch( stream_index )
-		{
-			case 0:	return DMA1_Stream0_IRQn;	break;
-			case 1:	return DMA1_Stream1_IRQn;	break;
-			case 2:	return DMA1_Stream2_IRQn;	break;
-			case 3:	return DMA1_Stream3_IRQn;	break;
-			case 4:	return DMA1_Stream4_IRQn;	break;
-			case 5:	return DMA1_Stream5_IRQn;	break;
-			case 6:	return DMA1_Stream6_IRQn;	break;
-			case 7:	return DMA1_Stream7_IRQn;	break;
-			default:	return DMA1_Stream0_IRQn;
-		};
-	}
-}
-
-
-/**
- * @brief	Enables the Cortex-M Nested Vector Interrupt Control (NVIC) for DMA events
- * @param	dmaHandle	G_HAL_DMA_Handle defined in g_hal_dma.h
- * @param	event_priority event interrupt priority (0 = highest priority, 15 = lowest priority)
- * 
- * @return	0x00 (FAIL)
- * @return	0x01 (PASS)
- * 
- */
-ReturnType stm32_dma_enable_nvic( G_HAL_DMA_Handle * dmaHandle, uint32_t event_priority )
-{
-	if( dmaHandle->setup.state != DMA_STATE_IDLE )
-		return FAIL;
-
-	NVIC_EnableIRQ( get_dma_event_irq( dmaHandle->setup.stream ));
-	NVIC_SetPriority( get_dma_event_irq( dmaHandle->setup.stream ), event_priority );
-
-	return PASS;
-}
-
-
-/**
- * @brief	Disables the Cortex Nested Vector Interrupt Control (NVIC) for DMA events
- * @param	dmaHandle	G_HAL_DMA_Handle defined in g_hal_dma.h
- * 
- */
-void stm32_dma_disable_nvic( G_HAL_DMA_Handle * dmaHandle )
-{
-	NVIC_DisableIRQ( get_dma_event_irq( dmaHandle->setup.stream ));
-}
 
 
 /**

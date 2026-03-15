@@ -3,15 +3,19 @@
  *  File Name: stm32_dma.h
  *  Type     : C header file
  *  Purpose  : STM32F DMA driver
- *  Version  : 3.2
+ *  Version  : 1.1
  * ===================================================================
  *  Description
  *		* STM32F non-blocking DMA driver.
  *
  * ===================================================================
  *  Revision History
- * Version/Date : v1.0 / 2025-Feb-14 / G.RUIZ
+ * Version/Date : v1.0 / 2026-Feb-14 / G.RUIZ
  *		* Initial release
+ * Version/Date : v1.1 / 2026-Mar-15 / G.RUIZ
+ * 		* Deprecated NVIC functions:
+ * 			stm32_dma_enable_nvic()
+ * 			stm32_dma_disable_nvic()
  * ===================================================================
  */
 
@@ -61,25 +65,6 @@ ReturnType stm32_start_dma_transaction( G_HAL_DMA_Handle * dmaHandle, uintptr_t 
  * 
 */
 // void stm32_abort_dma_transaction();
-
-/**
- * @brief	Enables the Cortex-M Nested Vector Interrupt Control (NVIC) for DMA events
- * @param	dmaHandle	G_HAL_DMA_Handle defined in g_hal_dma.h
- * @param	event_priority event interrupt priority (0 = highest priority, 15 = lowest priority)
- * 
- * @return	0x00 (FAIL)
- * @return	0x01 (PASS)
- * 
- */
-ReturnType stm32_dma_enable_nvic( G_HAL_DMA_Handle * dmaHandle, uint32_t event_priority );
-
-
-/**
- * @brief	Disables the Cortex Nested Vector Interrupt Control (NVIC) for DMA events
- * @param	dmaHandle	G_HAL_DMA_Handle defined in g_hal_dma.h
- * 
- */
-void stm32_dma_disable_nvic( G_HAL_DMA_Handle * dmaHandle );
 
 
 /**

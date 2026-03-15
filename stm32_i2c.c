@@ -3,7 +3,7 @@
  *  File Name: stm32_i2c.c
  *  Type     : C source file
  *  Purpose  : STM32F I2C driver
- *  Version  : 3.5
+ *  Version  : 3.6
  * ===================================================================
  *  Description
  *		* STM32F I2C driver. See Revision History for functional scope
@@ -61,6 +61,11 @@
  * 		txSize and rxSize: for Send, rxSize = 0; for Receive,
  * 		txSize = 0. Sequential mode (txSize & rxSize > 0) is not
  * 		allowed in DMA mode.
+ * Version/Date : v3.6 / 2026-Mar-15 / G.RUIZ
+ * 		* Deprecated NVIC functions:
+ * 			stm32_i2c_enable_nvic()
+ * 			stm32_i2c_set_nvic_priority()
+ * 			stm32_i2c_disable_nvic()
  * ===================================================================
  */
 
@@ -155,6 +160,15 @@ ReturnType stm32_i2c_initialize( G_HAL_I2C_Handle * i2c, uint8_t mcu_freq_mhz )
 {
 	I2C_TypeDef * _channel;
 	SELECT_I2C_CHAN( i2c->setup.channel );
+
+	IRQn_Type _eventIRQ = get_i2c_event_irq( i2c->setup.channel );
+	IRQn_Type _errorIRQ = get_i2c_error_irq( i2c->setup.channel );
+	NVIC_DisableIRQ( _eventIRQ );
+	NVIC_DisableIRQ( _errorIRQ );
+	NVIC_SetPriority( _eventIRQ, G_HAL_CONST_NVIC_PRIORITY_I2C_EVENT );
+	NVIC_SetPriority( _errorIRQ, G_HAL_CONST_NVIC_PRIORITY_I2C_ERROR );
+	NVIC_EnableIRQ( _eventIRQ );
+	NVIC_EnableIRQ( _errorIRQ );
 
 	if( stm32_i2c_config_rcc(_channel ) == FAIL ) return FAIL;
 	if( stm32_i2c_config_pins(_channel ) == FAIL ) return FAIL;
@@ -350,58 +364,6 @@ void stm32_i2c_sequential( G_HAL_I2C_Handle * i2c )
 //	i2c->restartMode = I2C_RESTART_ENABLED;		/* This should be disabled at the HAL layer, not here in the MCU layer. */
 	stm32_i2c_send( i2c );
 	stm32_i2c_receive( i2c );
-}
-
-
-/**
- * ===================================================================
- * @brief	Function definitions - NVIC functions
- * ===================================================================
- */
-
-/**
- * @brief	Enables the Cortex-M Nested Vector Interrupt Control (NVIC) for I2C events & errors
- * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
- * @return	0x00 (FAIL)
- * @return	0x01 (PASS)
- * 
- */
-ReturnType stm32_i2c_enable_nvic( G_HAL_I2C_Handle * i2c )
-{
-	if( i2c->setup.state != I2C_STATE_IDLE )
-		return FAIL;
-
-	NVIC_EnableIRQ( get_i2c_event_irq( i2c->setup.channel ));
-	NVIC_EnableIRQ( get_i2c_error_irq( i2c->setup.channel ));
-	
-	return PASS;
-}
-
-
-/**
- * @brief	Sets the Cortex-M Nested Vector Interrupt Control (NVIC) priorities for I2C events.
- * 			Non-zero value for the interrupt priority (0 = highest priority, 15 = lowest priority).
- * @param	i2c G_HAL_I2C_Handle defined in g_hal_i2c.h
- * @param	event_priority event interrupt priority (0-15)
- * @param	error_priority error interrupt priority (0-15)
- * 
- */
-void stm32_i2c_set_nvic_priority( G_HAL_I2C_Handle * i2c, uint32_t event_priority, uint32_t error_priority )
-{
-	NVIC_SetPriority( get_i2c_event_irq( i2c->setup.channel ), event_priority );
-	NVIC_SetPriority( get_i2c_error_irq( i2c->setup.channel ), error_priority );
-}
-
-
-/**
- * @brief	Disables the Cortex Nested Vector Interrupt Control (NVIC) for I2C events & errors
- * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
- * 
- */
-void stm32_i2c_disable_nvic( G_HAL_I2C_Handle * i2c )
-{
-	NVIC_DisableIRQ( get_i2c_event_irq( i2c->setup.channel ));
-	NVIC_DisableIRQ( get_i2c_error_irq( i2c->setup.channel ));
 }
 
 

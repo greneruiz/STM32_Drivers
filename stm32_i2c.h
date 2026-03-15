@@ -3,7 +3,7 @@
  *  File Name: stm32_i2c.h
  *  Type     : C header file
  *  Purpose  : STM32F I2C driver
- *  Version  : 3.4
+ *  Version  : 3.6
  * ===================================================================
  *  Description
  *		* STM32F I2C driver. See Revision History for functional scope
@@ -53,6 +53,11 @@
  *		* Implemented Direct Memory Access (DMA) feature
  * Version/Date : v3.4 / 2026-Feb-23 / G.RUIZ
  *		* Implemented sequential mode, both blocking and non-blocking
+ * Version/Date : v3.6 / 2026-Mar-15 / G.RUIZ
+ * 		* Deprecated NVIC functions:
+ * 			stm32_i2c_enable_nvic()
+ * 			stm32_i2c_set_nvic_priority()
+ * 			stm32_i2c_disable_nvic()
  * ===================================================================
  */
 
@@ -183,33 +188,6 @@ ReturnType stm32_i2c_sequential_nb( G_HAL_I2C_Handle * i2c );
 ReturnType stm32_i2c_irq_status( G_HAL_I2C_Handle * i2c );
 
 
-/**
- * @brief	Enables the Cortex-M Nested Vector Interrupt Control (NVIC) for I2C events & errors
- * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
- * @return	0x00 (FAIL)
- * @return	0x01 (PASS)
- * 
- */
-ReturnType stm32_i2c_enable_nvic( G_HAL_I2C_Handle * i2c );
-
-
-/**
- * @brief	Sets the Cortex-M Nested Vector Interrupt Control (NVIC) priorities for I2C events.
- * 			Non-zero value for the interrupt priority (0 = highest priority, 15 = lowest priority).
- * @param	i2c G_HAL_I2C_Handle defined in g_hal_i2c.h
- * @param	event_priority event interrupt priority (0-15)
- * @param	error_priority error interrupt priority (0-15)
- * 
- */
-void stm32_i2c_set_nvic_priority( G_HAL_I2C_Handle * i2c, uint32_t event_priority, uint32_t error_priority );
-
-
-/**
- * @brief	Disables the Cortex Nested Vector Interrupt Control (NVIC) for I2C events & errors
- * @param	i2c	G_HAL_I2C_Handle defined in g_hal_i2c.h
- * 
- */
-void stm32_i2c_disable_nvic( G_HAL_I2C_Handle * i2c );
 
 
 /**
