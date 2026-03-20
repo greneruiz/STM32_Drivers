@@ -168,7 +168,6 @@ static uint32_t stm32_dma_check_interrupts( DMA_Stream_TypeDef * stream, STM32F4
 
 	uint32_t stream_index = ((uintptr_t)stream - baseAddr ) / DMA_STREAM_ADDR_STRIDE;
 
-	/// TODO: SIMPLIFY. Made like this for debugging
 	/* Read the status register, then place the chosen channel's bits to the LSB */
 	switch( stream_index )
 	{
@@ -466,7 +465,6 @@ ReturnType stm32_dma_initialize( G_HAL_DMA_Handle * dmaHandle, uint8_t dmaChanne
 static void stm32_dma_arm( G_HAL_DMA_Handle * dmaHandle )
 {
 	/* Set DMA state to Busy */
-	/** TODO: 20260309 Check if this works! */
 	dmaHandle->setup.state = DMA_STATE_BUSY;
 
 	/* Enable IRQs */
@@ -503,7 +501,6 @@ void stm32_dma_disarm( G_HAL_DMA_Handle * dmaHandle )
 		STM32_DMA_FIFO_DISABLE_IRQ((( DMA_Stream_TypeDef * )( dmaHandle->setup.stream )));
 
 	/* Set to Idle state */
-	/** TODO: 20260309 Check if this works! */
 	dmaHandle->setup.state = DMA_STATE_IDLE;
 }
 
@@ -526,7 +523,7 @@ ReturnType stm32_start_dma_transaction( G_HAL_DMA_Handle * dmaHandle, uintptr_t 
 	stm32_dma_config( dmaHandle );
 
 	/* Set number of data */
-	WRITE_REG((( DMA_Stream_TypeDef * )( dmaHandle->setup.stream ))->NDTR, ( length & DMA_SxNDT ));
+	WRITE_REG((( DMA_Stream_TypeDef * )( dmaHandle->setup.stream ))->NDTR, (( length ) & DMA_SxNDT ));
 	
 	/* Assign the source and destination */
 	switch( dmaHandle->setup.transferDirection )

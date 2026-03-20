@@ -3,7 +3,7 @@
  *  File Name: stm32_i2c.c
  *  Type     : C source file
  *  Purpose  : STM32F I2C driver
- *  Version  : 3.6
+ *  Version  : 3.7
  * ===================================================================
  *  Description
  *		* STM32F I2C driver. See Revision History for functional scope
@@ -66,6 +66,11 @@
  * 			stm32_i2c_enable_nvic()
  * 			stm32_i2c_set_nvic_priority()
  * 			stm32_i2c_disable_nvic()
+ * Version/Date : v3.7 / 2026-Mar-20 / G.RUIZ
+ * 		* Fixed bug during DMA transactions over-sending bytes:
+ * 		At stm32_i2c_dma_completion_callback(), removed the i2c-stop
+ * 		and i2c-state update. The function still disables the I2C_DMAEN,
+ * 		to let the I2C IRQ handle the BTF state (e.g. perform i2c-stop).
  * ===================================================================
  */
 
@@ -501,12 +506,22 @@ void stm32_i2c_dma_completion_callback( G_HAL_DMA_Handle * dma )
 	/* clear the address status bit */
 	READ_REG( _channel->SR2 );		
 
-	/* Initiate stop */
-	SET_BIT( _channel->CR1, I2C_CR1_STOP );
-
 	/* Clear the I2C DMAEN bit */
-	/** TODO: 20260309 - Check if this works! */
 	CLEAR_BIT( _channel->CR2, I2C_CR2_DMAEN );
+
+	/* If transaction was I2C-receive, disable LAST bit and do the STOP sequence */
+	if( i2cParent->txSize == 0 && i2cParent->rxSize > 0 )
+	{
+		/* Clear LAST bit (set during I2C DMA-Receive) */
+		CLEAR_BIT( _channel->CR2, I2C_CR2_LAST );
+
+		/* Perform the STOP sequence */
+		SET_BIT( _channel->CR1, I2C_CR1_STOP );
+		
+		/* Disable I2C DMA */
+		STM32_I2C_DISABLE_IRQ(_channel );
+		i2cParent->setup.state = I2C_STATE_IDLE;
+	}
 }
 
 
@@ -521,14 +536,19 @@ void stm32_i2c_dma_error_callback( G_HAL_DMA_Handle * dma )
 	I2C_TypeDef * _channel;
 	SELECT_I2C_CHAN( i2cParent->setup.channel );
 
+	dma->disarm( dma );
+
 	/* clear the address status bit */
 	READ_REG( _channel->SR2 );		
 
 	/* Clear the I2C DMAEN bit */
-	/** TODO: 20260309 - Check if this works! */
 	CLEAR_BIT( _channel->CR2, I2C_CR2_DMAEN );
 
+	/* Clear LAST bit (set during I2C DMA-Receive) */
+	CLEAR_BIT( _channel->CR2, I2C_CR2_LAST );
+
 	dma->setup.state = DMA_STATE_ERROR;
+	i2cParent->setup.state = I2C_STATE_IDLE;
 }
 
 
@@ -588,8 +608,11 @@ ReturnType stm32_i2c_begin_dma( G_HAL_I2C_Handle * i2c, G_HAL_Priority priority 
 			thisDMA = i2c->rxDMAHandle;
 			thisDMA->setup.transferDirection = DMA_PER_TO_MEM;
 			_sourceAddr = (uintptr_t)&(_channel->DR );
-			_destAddr = (uintptr_t)i2c->txBuffer;
+			_destAddr = (uintptr_t)i2c->rxBuffer;
 			_length = i2c->rxSize;
+
+			/* Set LAST bit to automatically NACK the last byte received */
+			SET_BIT( _channel->CR2, I2C_CR2_LAST );
 		}
 	}
 	/* If Sequential Mode (txSize & rxSize > 0) or no valid transaction size: */
@@ -860,10 +883,6 @@ void STM32_I2C_EventIRQ_FSM( G_HAL_I2C_Handle * i2c )
  */
 void STM32_I2C_ErrorIRQ_FSM( G_HAL_I2C_Handle * i2c )
 {
-	/// TODO: add a qualifier if USART is enabled
-	// printf( " [ERROR] Encountered an I2C IRQ error!!\n\n" );
-	//i2c->setup.state = I2C_STATE_ERROR;
-
 	I2C_TypeDef * _channel;
 	SELECT_I2C_CHAN( i2c->setup.channel );
 	uint32_t _cond = READ_REG(_channel->SR1 );
